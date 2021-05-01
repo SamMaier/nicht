@@ -174,7 +174,9 @@ class Function:
     return "Function(" + str(self.m) + ", " + str(self.b) + ")"
     
 class Creature:
-  def __init__(self, fns):
+  def __init__(self, fns=None):
+    if fns is None:
+      fns = [Function(random.uniform(-1.0,1.0), random.uniform(-200,1000)) for x in range(6)] 
     assert len(fns) == 6
     self.fns = fns
     self.strat = Strategy(lambda d, s: fns[d-1].call(s))
@@ -198,28 +200,30 @@ class Creature:
     return "Creature([" + ",\n".join([str(f) for f in self.fns]) + "])"
       
 
-# Not totally correct, since probabilities at 4+ arent exclusive yet are being subtracted
-risk_table = {1:2.0/3.0, 2:4.0/9.0, 3:8.0/27.0 - 4.0/216.0, 4: 16.0/81.0 - 4*0.0162, 5: 32.0/243.0 - 4*0.0355, 6: 64.0/729.0 - 4*0.0623}
-dumb_creature = Creature([Function(1.0-risk_table[1], 100),
-                          Function(1.0-risk_table[2], 200),
-                          Function(1.0-risk_table[3], 300),
-                          Function(1.0-risk_table[4], 400),
-                          Function(1.0-risk_table[5], 500),
-                          Function(1.0-risk_table[6], 600)])
-
-winner = Creature([Function(0.3255622078722859, 282.3764025270552),
+winner = Creature([Function(0.3576299561687098, 154.2237193766661),
+                Function(0.17288173812000074, 158.557197887695),
+                Function(0.5166028318225361, 201.1821159567643),
+                Function(0.36904831949006134, 324.36493872116625),
+                Function(0.9582939808572809, 339.67967962153176),
+                Function(6.203658103193804, 3104.2754402961286)])
+runner_up =          Creature([Function(0.3255622078722859, 282.3764025270552),
                   Function(0.1444338457754891, 100.94515448510734),
                   Function(0.6737078024802203, 102.4173438927874),
-                  Function(0.7010228500069347, 334.21965970169293),
+                  Function(0.7078819299034407, 291.8847164506272),
                   Function(0.42077984586108585, 455.61684598995805),
                   Function(2.881268157958244, 1329.3238138727988)])
+random_guy = Creature([Function(-4.68340220354444, 1700.995221339466),
+Function(0.9368452001058065, -118.66996971082506),
+Function(0.7658604487203977, 102.4711566925939),
+Function(-0.14980383824231824, 374.32357762177423),
+Function(-1.1247622281824705, 498.73254507608965),
+Function(-0.4607148044356967, -165.70911870991122)])
 #22000 so baseline gets ~1mil
 NUM_EVALS = 22000
-runner_up = dumb_creature
 global_winner = winner
 max_score = NUM_EVALS * 460 # 460 is a bad-ish average per turn
 for gen in range(100):
-  creatures = [global_winner, winner, global_winner.gen_mutant(), global_winner.gen_mutant(), winner.gen_mutant(), winner.gen_mutant(), runner_up.gen_mutant()]
+  creatures = [global_winner, global_winner.gen_mutant(), global_winner.gen_mutant(), winner.gen_mutant(), winner.gen_mutant(), runner_up.gen_mutant(), runner_up.gen_mutant(), Creature()]
   scores = [c.evaluate(NUM_EVALS) for c in creatures]
   print(scores)
   winning_score = scores[0]
@@ -235,9 +239,18 @@ for gen in range(100):
       rup_score = scores[i]
 
   if (winning_score > max_score):
-    global_winner = winner
-    max_score = winning_score
-    print("New Record: "+ str(winning_score) + " from the " + str(scores.index(winning_score)))
-    print(winner)
+    if winner == global_winner:
+      max_score = (winning_score + max_score) / 2.0
+    elif (winner.evaluate(NUM_EVALS*5) > global_winner.evaluate(NUM_EVALS*5)):
+      global_winner = winner
+      max_score = winning_score
+      winning_spot = scores.index(winning_score)
+      print("New Record: "+ str(winning_score) + " from the " + str(winning_spot))
+      print(winner)
+      with open("h2hwinners.txt", "a") as f:
+        f.write(str(winner))
+        f.write("\n\n")
 
 print(global_winner)
+print("Scored a max of: " + str(max_score))
+print("Confirmation run gives " + str(global_winner.evaluate(NUM_EVALS*100)))
