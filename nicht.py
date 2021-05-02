@@ -1,7 +1,10 @@
 #!/usr/bin/python3
 import random
+from collections import deque
 
-class Game:
+WINNING_SCORE = 10000
+
+class Turn:
   def __init__(self):
     self.score = 0
     self.available_dice = 6
@@ -63,7 +66,7 @@ class Strategy:
     self.prediction_function = fn
 
 
-  def make_decision(self, _dice, game):
+  def make_decision(self, _dice, game, own_score, adj_score, max_score):
     def generate_all_picks(dice):
       def single_dice_gen(counts):
         if counts[0] < 3 and counts[0]:
@@ -126,10 +129,12 @@ class Strategy:
       return dice
     best_pick = None
     best_score, _ = game.check_score(dice)
+    if best_score + own_score >= WINNING_SCORE:
+      return generate_all_picks(dice)[-1]
     for pick in generate_all_picks(dice):
       score, num_used_dice = game.check_score(pick)
       available_dice = game.available_dice - num_used_dice
-      prediction = self.prediction_function(available_dice, score)
+      prediction = self.prediction_function(available_dice, score, own_score, adj_score, max_score)
       if prediction > best_score:
         best_score = prediction
         best_pick = pick
@@ -137,55 +142,63 @@ class Strategy:
     return best_pick
 
 
-  def play_game(self):
-    game = Game()
-    while True:
+  def play_turn(self, own_score = 0, adjacent_score = 0, max_score = 0):
+    game = Turn()
+    while game.score + own_score < WINNING_SCORE:
       dice = game.roll_dice()
       if not dice:
         break
-      dice_to_take = self.make_decision(dice, game)
+      dice_to_take = self.make_decision(dice, game, own_score, adjacent_score, max_score)
       if not dice_to_take:
         game.end_turn(dice)
         break
       else:
         game.take_dice(dice_to_take)
-    assert game.available_dice == -1
     return game.score
 
-def generic_function(d,
-                     s,
-                     fns):
-  return fns[d-1].call(s)
-  
+
 class Function:
-  def __init__(self, m, b):
+  def __init__(self, m, b, own_score_c = 0, adj_score_c = 0, max_score_c = 0):
     self.m = m
     self.b = b
+    self.own_score_c = own_score_c
+    self.adj_score_c = adj_score_c
+    self.max_score_c = max_score_c
 
-  def call(self, x):
-    return (self.m*x) + self.b
+  def call(self, x, own_score, adj_score, max_score):
+    return (self.m*x) + (self.own_score_c*own_score) + (self.adj_score_c*adj_score) + (self.max_score_c*max_score) +self.b
 
   def mutate(self):
-    mutation_size_m = random.uniform(0.5,2)
-    mutation_size_b = random.uniform(0.5,2)
-    return Function(self.m*mutation_size_m, self.b*mutation_size_b)
+    m_m = random.uniform(-0.5,2)
+    m_b = random.uniform(-0.5,2)
+    m_o = random.uniform(-0.5,2)
+    m_a = random.uniform(-0.5,2)
+    m_mx = random.uniform(-0.5,2)
+    return Function(self.m*m_m, self.b*m_b, self.own_score_c*m_o, self.adj_score_c*m_a, self.max_score_c*m_mx)
 
   def __str__(self):
-    return "Function(" + str(self.m) + ", " + str(self.b) + ")"
+    return "Function(" + str(self.m) + ", " + str(self.b) + ", " + str(self.own_score_c) +  ", " + str(self.adj_score_c) + ", " + str(self.max_score_c) + ")"
     
 class Creature:
-  def __init__(self, fns=None):
+  def __init__(self, fns=None, zero_all = False):
     if fns is None:
-      fns = [Function(random.uniform(-1.0,1.0), random.uniform(-200,1000)) for x in range(6)] 
+      if zero_all:
+        fns = [Function(random.uniform(-1.0,1.0), random.uniform(-200,1000)) for x in range(6)] 
+      else:
+        fns = [Function(random.uniform(-1.0,1.0), random.uniform(-200,1000), random.uniform(-1.0,1.0), random.uniform(-1.0,1.0), random.uniform(-1.0,1.0)) for x in range(6)] 
     assert len(fns) == 6
     self.fns = fns
-    self.strat = Strategy(lambda d, s: fns[d-1].call(s))
+    self.strat = Strategy(lambda d, s, o, a, m: fns[d-1].call(s, o, a, m))
 
+  # Just to get non-competitve fitness
   def evaluate(self, n):
     val = 0
     for _ in range(n):
-      val += self.strat.play_game()
+      val += self.strat.play_turn()
     return val
+
+  def play_single_turn(self, own_score, adjacent_score, max_score):
+    return self.strat.play_turn(own_score, adjacent_score, max_score)
 
   def gen_mutant(self):
     num_of_mutations = random.randint(1,5)
@@ -199,58 +212,71 @@ class Creature:
   def __str__(self):
     return "Creature([" + ",\n".join([str(f) for f in self.fns]) + "])"
       
+class Matchup:
+  def __init__(self, creatures):
+    self.creatures = creatures
+    self.tally = [0]*len(creatures)
 
-winner = Creature([Function(0.3576299561687098, 154.2237193766661),
-                Function(0.17288173812000074, 158.557197887695),
-                Function(0.5166028318225361, 201.1821159567643),
-                Function(0.36904831949006134, 324.36493872116625),
-                Function(0.9582939808572809, 339.67967962153176),
-                Function(6.203658103193804, 3104.2754402961286)])
-runner_up =          Creature([Function(0.3255622078722859, 282.3764025270552),
-                  Function(0.1444338457754891, 100.94515448510734),
-                  Function(0.6737078024802203, 102.4173438927874),
-                  Function(0.7078819299034407, 291.8847164506272),
-                  Function(0.42077984586108585, 455.61684598995805),
-                  Function(2.881268157958244, 1329.3238138727988)])
-random_guy = Creature([Function(-4.68340220354444, 1700.995221339466),
-Function(0.9368452001058065, -118.66996971082506),
-Function(0.7658604487203977, 102.4711566925939),
-Function(-0.14980383824231824, 374.32357762177423),
-Function(-1.1247622281824705, 498.73254507608965),
-Function(-0.4607148044356967, -165.70911870991122)])
-#22000 so baseline gets ~1mil
-NUM_EVALS = 22000
-global_winner = winner
-max_score = NUM_EVALS * 460 # 460 is a bad-ish average per turn
-for gen in range(100):
-  creatures = [global_winner, global_winner.gen_mutant(), global_winner.gen_mutant(), winner.gen_mutant(), winner.gen_mutant(), runner_up.gen_mutant(), runner_up.gen_mutant(), Creature()]
-  scores = [c.evaluate(NUM_EVALS) for c in creatures]
-  print(scores)
-  winning_score = scores[0]
-  rup_score = 0
-  for i in range(1, len(scores)):
-    if scores[i] > winning_score:
-      runner_up = winner
-      rup_score = winning_score
-      winner = creatures[i]
-      winning_score = scores[i]
-    elif scores[i] > rup_score:
-      runner_up = creatures[i]
-      rup_score = scores[i]
+  def play_game(self, curr_turn):
+    curr_turn -= 1 # Just setting up to increment right away
+    scores = [0]*len(self.creatures)
+    while scores[curr_turn] < WINNING_SCORE:
+      curr_turn = (curr_turn + 1) % len(self.creatures)
+      max_score = 0
+      for i in range(len(scores)):
+        if i == curr_turn:
+          continue
+        if scores[i] > max_score:
+          max_score = scores[i]
+      scores[curr_turn] += self.creatures[curr_turn].play_single_turn(scores[curr_turn], scores[(curr_turn + 1) % len(self.creatures)], max_score)
+    return curr_turn
+  
+  def get_winner(self, n):
+    for _ in range(n):
+      for starter in range(len(self.creatures)):
+        game_winner = self.play_game(starter)
+        self.tally[game_winner] += 1
+    return self.creatures[self.tally.index(max(self.tally))]
 
-  if (winning_score > max_score):
-    if winner == global_winner:
-      max_score = (winning_score + max_score) / 2.0
-    elif (winner.evaluate(NUM_EVALS*5) > global_winner.evaluate(NUM_EVALS*5)):
-      global_winner = winner
-      max_score = winning_score
-      winning_spot = scores.index(winning_score)
-      print("New Record: "+ str(winning_score) + " from the " + str(winning_spot))
-      print(winner)
-      with open("h2hwinners.txt", "a") as f:
-        f.write(str(winner))
-        f.write("\n\n")
-
-print(global_winner)
-print("Scored a max of: " + str(max_score))
-print("Confirmation run gives " + str(global_winner.evaluate(NUM_EVALS*100)))
+# 3 GREAT SOLO PLAYERs
+#winner = Creature([Function(0.3576299561687098, 154.2237193766661),
+#                   Function(0.17288173812000074, 158.557197887695),
+#                   Function(0.5166028318225361, 201.1821159567643),
+#                   Function(0.36904831949006134, 324.36493872116625),
+#                   Function(0.9582939808572809, 339.67967962153176),
+#                   Function(6.203658103193804, 3104.2754402961286)])
+#runner_up = Creature([Function(0.3255622078722859, 282.3764025270552),
+#                      Function(0.1444338457754891, 100.94515448510734),
+#                      Function(0.6737078024802203, 102.4173438927874),
+#                      Function(0.7078819299034407, 291.8847164506272),
+#                      Function(0.42077984586108585, 455.61684598995805),
+#                      Function(2.881268157958244, 1329.3238138727988)])
+#random_guy = Creature([Function(-4.68340220354444, 1700.995221339466),
+#                       Function(0.9368452001058065, -118.66996971082506),
+#                       Function(0.7658604487203977, 102.4711566925939),
+#                       Function(-0.14980383824231824, 374.32357762177423),
+#                       Function(-1.1247622281824705, 498.73254507608965),
+#                       Function(-0.4607148044356967, -165.70911870991122)])
+creatures = deque()
+for c in range(64 - len(creatures)):
+  creatures.append(Creature())
+for tourny in range(20):
+  random.shuffle(creatures)
+  while len(creatures) > 4:
+    players = []
+    for _ in range(4):
+      players.append(creatures.popleft())
+    creatures.append(Matchup(players).get_winner(50))
+  
+  finals_players = []
+  for i in range(4):
+    finals_players.append(creatures[i])
+    for _ in range(10):
+      creatures.append(creatures[i].gen_mutant())
+  champ = Matchup(finals_players).get_winner(200)
+  for _ in range(64-len(creatures)):
+    creatures.append(champ.gen_mutant())
+  print(champ)
+  with open("h2hwinners.txt", "a") as f:
+    f.write(str(champ))
+    f.write("\n\n")
